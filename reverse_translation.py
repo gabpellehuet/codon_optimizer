@@ -192,20 +192,21 @@ def _run_optimization(codons: list[str], codon_table: dict,
                       freq_threshold: float, max_iterations: int
                       ) -> tuple[list[str], list, list, dict]:
     """
-    Two-phase optimizer.
+    Multi-phase optimizer.
 
-    Phase 1 — Homopolymer runs (4+ consecutive identical nucleotides)
-        For each run, all synonyms of overlapping codons are tried.  The one
-        that reduces the total number of homopolymer runs the most is applied.
-        If no synonym helps, the run is warned and skipped.
-
-    Phase 2 — Identical adjacent codons
-        For each adjacent identical pair, synonyms are tried.  A synonym is
-        only accepted if it does not increase the homopolymer run count.
+    Phases 1-3 (homopolymer runs, adjacent identical codons, skip-1 identical
+    codons) first try to fix each violation using only synonyms at or above
+    freq_threshold. If none of those can fix it, they fall back to the full
+    synonym pool (ignoring the threshold) as a last resort, so a violation is
+    never left unfixed just because every fixing codon happens to be rare.
+    Such fallback substitutions are tagged "(threshold override)" in the
+    change log. If no synonym at all (even ignoring frequency) can fix it,
+    the violation is warned and skipped.
 
     Frequency upgrade
-        Each codon is upgraded to its most frequent synonym (>= freq_threshold)
-        that keeps the sequence free of runs and adjacent identical pairs.
+        Each remaining codon is upgraded to its most frequent synonym
+        (>= freq_threshold) that keeps the sequence free of runs and
+        adjacent/skip-1 identical pairs.
     """
     import random
     rng = random.Random(42)
@@ -229,49 +230,61 @@ def _run_optimization(codons: list[str], codon_table: dict,
             end = start + run_len
             cand_idxs = sorted({p // 3 for p in range(start, end)
                                  if 0 <= p // 3 < len(codons)})
-            candidates = [(ci, alt)
-                          for ci in cand_idxs
-                          for alt in get_synonyms(codons[ci], codon_table, 0.0)]
-            rng.shuffle(candidates)
-
             cur_n = _n_homo(codons)
-            best_idx, best_alt, best_n = None, None, cur_n
-            for ci, alt in candidates:
-                trial = codons[:]
-                trial[ci] = alt
-                n = _n_homo(trial)
-                if n < best_n:
-                    best_n, best_idx, best_alt = n, ci, alt
 
-            if best_idx is not None:
-                old = codons[best_idx]
-                codons[best_idx] = best_alt
-                changes.append((best_idx, old, best_alt,
-                                 f"homopolymer '{nt * run_len}' @{start}"))
+            fix_idx = fix_alt = fix_pair = None
+            used_fallback = False
+            for threshold_try, is_fallback in [(freq_threshold, False), (0.0, True)]:
+                candidates = [(ci, alt)
+                              for ci in cand_idxs
+                              for alt in get_synonyms(codons[ci], codon_table, threshold_try)]
+                rng.shuffle(candidates)
+
+                best_idx, best_alt, best_n = None, None, cur_n
+                for ci, alt in candidates:
+                    trial = codons[:]
+                    trial[ci] = alt
+                    n = _n_homo(trial)
+                    if n < best_n:
+                        best_n, best_idx, best_alt = n, ci, alt
+
+                if best_idx is not None:
+                    fix_idx, fix_alt, used_fallback = best_idx, best_alt, is_fallback
+                    break
+
+                # Single change insufficient — try all pairs of substitutions
+                best_pair, best_pair_n = None, cur_n
+                for ci1, alt1 in candidates:
+                    trial1 = codons[:]
+                    trial1[ci1] = alt1
+                    for ci2, alt2 in candidates:
+                        if ci2 == ci1:
+                            continue
+                        trial2 = trial1[:]
+                        trial2[ci2] = alt2
+                        n = _n_homo(trial2)
+                        if n < best_pair_n:
+                            best_pair_n, best_pair = n, (ci1, alt1, ci2, alt2)
+
+                if best_pair is not None:
+                    fix_pair, used_fallback = best_pair, is_fallback
+                    break
+
+            suffix = " (threshold override)" if used_fallback else ""
+            if fix_idx is not None:
+                old = codons[fix_idx]
+                codons[fix_idx] = fix_alt
+                changes.append((fix_idx, old, fix_alt,
+                                 f"homopolymer '{nt * run_len}' @{start}{suffix}"))
                 improved = True
                 break
-
-            # Single change insufficient — try all pairs of substitutions
-            best_pair, best_pair_n = None, cur_n
-            for ci1, alt1 in candidates:
-                trial1 = codons[:]
-                trial1[ci1] = alt1
-                for ci2, alt2 in candidates:
-                    if ci2 == ci1:
-                        continue
-                    trial2 = trial1[:]
-                    trial2[ci2] = alt2
-                    n = _n_homo(trial2)
-                    if n < best_pair_n:
-                        best_pair_n, best_pair = n, (ci1, alt1, ci2, alt2)
-
-            if best_pair is not None:
-                ci1, alt1, ci2, alt2 = best_pair
+            elif fix_pair is not None:
+                ci1, alt1, ci2, alt2 = fix_pair
                 for ci, alt in [(ci1, alt1), (ci2, alt2)]:
                     old = codons[ci]
                     codons[ci] = alt
                     changes.append((ci, old, alt,
-                                     f"homopolymer '{nt * run_len}' @{start} (pair)"))
+                                     f"homopolymer '{nt * run_len}' @{start} (pair){suffix}"))
                 improved = True
                 break
             else:
@@ -294,21 +307,29 @@ def _run_optimization(codons: list[str], codon_table: dict,
         cur_v = len(adjs)
         improved = False
         for i, j, c in adjs:
-            best_idx, best_alt, best_v = None, None, cur_v
-            for cand in [i, j]:
-                for alt in get_synonyms(codons[cand], codon_table, 0.0):
-                    trial = codons[:]
-                    trial[cand] = alt
-                    if _n_homo(trial) > n_homo:
-                        continue
-                    v = len(find_identical_adjacent(trial))
-                    if v < best_v:
-                        best_v, best_idx, best_alt = v, cand, alt
+            best_idx = best_alt = None
+            used_fallback = False
+            for threshold_try, is_fallback in [(freq_threshold, False), (0.0, True)]:
+                best_v = cur_v
+                cand_idx, cand_alt = None, None
+                for cand in [i, j]:
+                    for alt in get_synonyms(codons[cand], codon_table, threshold_try):
+                        trial = codons[:]
+                        trial[cand] = alt
+                        if _n_homo(trial) > n_homo:
+                            continue
+                        v = len(find_identical_adjacent(trial))
+                        if v < best_v:
+                            best_v, cand_idx, cand_alt = v, cand, alt
+                if cand_idx is not None:
+                    best_idx, best_alt, used_fallback = cand_idx, cand_alt, is_fallback
+                    break
             if best_idx is not None:
+                suffix = " (threshold override)" if used_fallback else ""
                 old = codons[best_idx]
                 codons[best_idx] = best_alt
                 changes.append((best_idx, old, best_alt,
-                                 f"adjacent ({i}&{j}: {c})"))
+                                 f"adjacent ({i}&{j}: {c}){suffix}"))
                 improved = True
                 break
 
@@ -331,22 +352,30 @@ def _run_optimization(codons: list[str], codon_table: dict,
         cur_v = len(skips)
         improved = False
         for i, j, c in skips:
-            best_idx, best_alt, best_v = None, None, cur_v
-            for cand in [i, j]:
-                for alt in get_synonyms(codons[cand], codon_table, 0.0):
-                    trial = codons[:]
-                    trial[cand] = alt
-                    if (_n_homo(trial) > n_homo or
-                            len(find_identical_adjacent(trial)) > n_adj):
-                        continue
-                    v = len(find_identical_skip1(trial))
-                    if v < best_v:
-                        best_v, best_idx, best_alt = v, cand, alt
+            best_idx = best_alt = None
+            used_fallback = False
+            for threshold_try, is_fallback in [(freq_threshold, False), (0.0, True)]:
+                best_v = cur_v
+                cand_idx, cand_alt = None, None
+                for cand in [i, j]:
+                    for alt in get_synonyms(codons[cand], codon_table, threshold_try):
+                        trial = codons[:]
+                        trial[cand] = alt
+                        if (_n_homo(trial) > n_homo or
+                                len(find_identical_adjacent(trial)) > n_adj):
+                            continue
+                        v = len(find_identical_skip1(trial))
+                        if v < best_v:
+                            best_v, cand_idx, cand_alt = v, cand, alt
+                if cand_idx is not None:
+                    best_idx, best_alt, used_fallback = cand_idx, cand_alt, is_fallback
+                    break
             if best_idx is not None:
+                suffix = " (threshold override)" if used_fallback else ""
                 old = codons[best_idx]
                 codons[best_idx] = best_alt
                 changes.append((best_idx, old, best_alt,
-                                 f"skip-1 ({i}&{j}: {c})"))
+                                 f"skip-1 ({i}&{j}: {c}){suffix}"))
                 improved = True
                 break
 
