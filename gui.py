@@ -20,6 +20,9 @@ from reverse_translation import (
     _aa_for_codon,
     CODON_TABLE_TEXT,
 )
+from codon_tables import CODON_TABLES
+
+CUSTOM_TABLE_LABEL = "Custom / loaded from file"
 
 DEFAULT_AA_SEQUENCE = (
     "EIIEEVLLNSKKDSLTEAEIYELVQKQLSTDPALKGVKLSKEEVRETLQELVIEGRLIKDKITGKYRLSTNTRLELLIEQLP"
@@ -37,15 +40,16 @@ class CodonOptimizerApp(tk.Tk):
 
     # ── UI construction ────────────────────────────────────────────────
     def _build_widgets(self):
+        # Top-level layout uses pack(), not grid(), so the Optimize button and
+        # the bottom action bar are pinned at their natural size and never get
+        # squeezed out when the window is resized smaller. Only the results
+        # notebook (packed last, with expand=True) absorbs extra/missing space.
         root = ttk.Frame(self, padding=10)
         root.pack(fill="both", expand=True)
-        root.columnconfigure(0, weight=1)
-        root.columnconfigure(1, weight=1)
-        root.rowconfigure(2, weight=1)
 
-        # Mode selector
+        # Mode selector (pinned, top)
         mode_frame = ttk.LabelFrame(root, text="Input mode", padding=8)
-        mode_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        mode_frame.pack(side="top", fill="x", pady=(0, 8))
         self.mode = tk.StringVar(value="aa")
         ttk.Radiobutton(mode_frame, text="Amino acid sequence", variable=self.mode,
                          value="aa", command=self._on_mode_change).pack(side="left", padx=5)
@@ -57,36 +61,60 @@ class CodonOptimizerApp(tk.Tk):
         ttk.Spinbox(mode_frame, from_=0.0, to=1.0, increment=0.01, width=6,
                     textvariable=self.freq_threshold).pack(side="left")
 
-        # Left column: sequence input
-        seq_frame = ttk.LabelFrame(root, text="Sequence", padding=8)
-        seq_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 5))
-        self.seq_text = tk.Text(seq_frame, height=8, wrap="word")
+        # Input row: sequence + codon table side by side (pinned, top)
+        input_frame = ttk.Frame(root)
+        input_frame.pack(side="top", fill="x", pady=(0, 8))
+        input_frame.columnconfigure(0, weight=1)
+        input_frame.columnconfigure(1, weight=1)
+
+        seq_frame = ttk.LabelFrame(input_frame, text="Sequence", padding=8)
+        seq_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        self.seq_text = tk.Text(seq_frame, height=5, wrap="word")
         self.seq_text.pack(fill="both", expand=True)
         self.seq_text.insert("1.0", DEFAULT_AA_SEQUENCE)
 
-        # Right column: codon table input
-        table_frame = ttk.LabelFrame(root, text="Codon usage table", padding=8)
-        table_frame.grid(row=1, column=1, sticky="nsew", padx=(5, 0))
+        table_frame = ttk.LabelFrame(input_frame, text="Codon usage table", padding=8)
+        table_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
         table_frame.columnconfigure(0, weight=1)
-        table_frame.rowconfigure(1, weight=1)
+        table_frame.rowconfigure(2, weight=1)
+
+        picker_row = ttk.Frame(table_frame)
+        picker_row.grid(row=0, column=0, sticky="ew")
+        ttk.Label(picker_row, text="Organism:").pack(side="left")
+        self.organism = tk.StringVar(value="Escherichia coli K12")
+        organism_names = list(CODON_TABLES.keys()) + [CUSTOM_TABLE_LABEL]
+        self.organism_combo = ttk.Combobox(
+            picker_row, textvariable=self.organism, values=organism_names,
+            state="readonly", width=28,
+        )
+        self.organism_combo.pack(side="left", padx=(5, 0))
+        self.organism_combo.bind("<<ComboboxSelected>>", self._on_organism_change)
+
         ttk.Button(table_frame, text="Load from file...",
-                   command=self._load_table_file).grid(row=0, column=0, sticky="w")
-        self.table_text = tk.Text(table_frame, height=8, wrap="none")
-        self.table_text.grid(row=1, column=0, sticky="nsew", pady=(5, 0))
+                   command=self._load_table_file).grid(row=1, column=0, sticky="w", pady=(5, 0))
+        self.table_text = tk.Text(table_frame, height=5, wrap="none")
+        self.table_text.grid(row=2, column=0, sticky="nsew", pady=(5, 0))
         self.table_text.insert("1.0", CODON_TABLE_TEXT.strip())
 
-        # Run button
+        # Bottom action bar (pinned, bottom) - packed before the expanding
+        # notebook so it always keeps its place at the very bottom.
+        action_frame = ttk.Frame(root)
+        action_frame.pack(side="bottom", fill="x", pady=(8, 0))
+        ttk.Button(action_frame, text="Copy final sequence",
+                   command=self._copy_sequence).pack(side="left")
+        ttk.Button(action_frame, text="Save to FASTA...",
+                   command=self._save_fasta).pack(side="left", padx=5)
+
+        # Run button (pinned, just above the action bar)
         run_btn = ttk.Button(root, text="Optimize", command=self._run_optimization)
-        run_btn.grid(row=2, column=0, columnspan=2, sticky="ew", pady=8)
-        root.rowconfigure(1, minsize=180)
+        run_btn.pack(side="bottom", fill="x", pady=(0, 8))
 
-        # Results notebook
+        # Results notebook - the only section that expands/shrinks
         self.notebook = ttk.Notebook(root)
-        self.notebook.grid(row=3, column=0, columnspan=2, sticky="nsew")
-        root.rowconfigure(3, weight=3)
+        self.notebook.pack(side="top", fill="both", expand=True)
 
-        self.summary_text = tk.Text(self.notebook, wrap="word", state="disabled")
-        self.notebook.add(self.summary_text, text="Final sequence")
+        self.summary_text = tk.Text(self.notebook, height=8, wrap="word", state="disabled")
+        self.notebook.add(self.summary_text, text="Sequences")
 
         self.changes_tree = ttk.Treeview(
             self.notebook, columns=("idx", "aa", "old", "new", "reason"), show="headings"
@@ -99,21 +127,20 @@ class CodonOptimizerApp(tk.Tk):
             self.changes_tree.column(col, width=width, anchor="center")
         self.notebook.add(self.changes_tree, text="Changes")
 
-        self.issues_text = tk.Text(self.notebook, wrap="word", state="disabled")
+        self.issues_text = tk.Text(self.notebook, height=8, wrap="word", state="disabled")
         self.notebook.add(self.issues_text, text="Warnings / Remaining issues")
-
-        # Bottom action bar
-        action_frame = ttk.Frame(root)
-        action_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        ttk.Button(action_frame, text="Copy final sequence",
-                   command=self._copy_sequence).pack(side="left")
-        ttk.Button(action_frame, text="Save to FASTA...",
-                   command=self._save_fasta).pack(side="left", padx=5)
 
     def _on_mode_change(self):
         self.seq_text.delete("1.0", "end")
         if self.mode.get() == "aa":
             self.seq_text.insert("1.0", DEFAULT_AA_SEQUENCE)
+
+    def _on_organism_change(self, event=None):
+        name = self.organism.get()
+        if name == CUSTOM_TABLE_LABEL:
+            return
+        self.table_text.delete("1.0", "end")
+        self.table_text.insert("1.0", CODON_TABLES[name].strip())
 
     def _load_table_file(self):
         path = filedialog.askopenfilename(
@@ -126,6 +153,7 @@ class CodonOptimizerApp(tk.Tk):
             content = f.read()
         self.table_text.delete("1.0", "end")
         self.table_text.insert("1.0", content)
+        self.organism.set(CUSTOM_TABLE_LABEL)
 
     # ── Core action ─────────────────────────────────────────────────────
     def _run_optimization(self):
@@ -153,10 +181,12 @@ class CodonOptimizerApp(tk.Tk):
     # ── Result display ─────────────────────────────────────────────────
     def _display_result(self, result: dict, threshold: float):
         ct = result["codon_table"]
+        initial = result["initial_codons"]
         final = result["final_codons"]
         changes = result["changes"]
         warnings = result["warnings"]
         issues = result["remaining_issues"]
+        initial_nt = "".join(initial)
         final_nt = "".join(final)
 
         # Summary tab
@@ -166,7 +196,9 @@ class CodonOptimizerApp(tk.Tk):
         self.summary_text.insert("end", f"Changes applied: {len(changes)}\n")
         self.summary_text.insert("end", f"Warnings: {len(warnings)}\n")
         self.summary_text.insert("end", f"Frequency threshold: {threshold}\n\n")
-        self.summary_text.insert("end", "Final nucleotide sequence:\n")
+        self.summary_text.insert("end", "Initial sequence (before optimization):\n")
+        self.summary_text.insert("end", initial_nt + "\n\n")
+        self.summary_text.insert("end", "Final sequence (after optimization):\n")
         self.summary_text.insert("end", final_nt + "\n")
         self.summary_text.config(state="disabled")
 

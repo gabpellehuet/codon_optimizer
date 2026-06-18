@@ -45,6 +45,12 @@ Windows/macOS (on Linux it may need a separate package, e.g. `sudo apt install
 python3-tk`, but the GUI is intended for Windows users — Linux users will typically
 prefer Option A).
 
+The GUI includes an "Organism" dropdown with codon usage tables bundled locally
+(no internet connection needed) for *E. coli* K12, *S. cerevisiae*, *H. sapiens*,
+*M. musculus*, *P. pastoris*, and *B. subtilis*, sourced from the
+[Kazusa Codon Usage Database](https://www.kazusa.or.jp/codon/). You can also load
+a custom table from a file.
+
 ## Building the Windows executable yourself
 
 ```bash
