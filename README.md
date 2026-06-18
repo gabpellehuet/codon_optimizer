@@ -16,6 +16,8 @@ the resulting codons for a given organism's codon usage table.
 
 ## Usage
 
+### Option A — Run from source (Python, any OS including Linux/macOS)
+
 Edit the `CODON_TABLE_TEXT`, `AMINO_ACID_SEQUENCE` (or `INPUT_NT_SEQUENCE`), and
 `FREQ_THRESHOLD` constants near the bottom of `reverse_translation.py`, then run:
 
@@ -23,10 +25,34 @@ Edit the `CODON_TABLE_TEXT`, `AMINO_ACID_SEQUENCE` (or `INPUT_NT_SEQUENCE`), and
 python reverse_translation.py
 ```
 
-## Requirements
+Requirements: Python 3.10+, and optionally `rich` for colored terminal output
+(`pip install rich`). No GUI dependencies needed for this path.
 
-- Python 3.10+
-- `rich` (optional, for colored output): `pip install rich`
+### Option B — Windows GUI app (no Python required)
+
+Download the latest `CodonOptimizer.exe` from the
+[Releases page](https://github.com/gabpellehuet/codon_optimizer/releases) and run it
+directly — no installation, no Python needed.
+
+If you'd rather run the GUI from source instead:
+
+```bash
+python gui.py
+```
+
+This only requires `tkinter`, which ships with the standard Python installer on
+Windows/macOS (on Linux it may need a separate package, e.g. `sudo apt install
+python3-tk`, but the GUI is intended for Windows users — Linux users will typically
+prefer Option A).
+
+## Building the Windows executable yourself
+
+```bash
+pip install pyinstaller
+pyinstaller --onefile --windowed --name CodonOptimizer gui.py
+```
+
+The executable is written to `dist/CodonOptimizer.exe`.
 
 ## License
 
