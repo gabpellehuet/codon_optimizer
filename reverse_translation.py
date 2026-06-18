@@ -276,6 +276,12 @@ def _run_optimization(codons: list[str], codon_table: dict,
                 codons[fix_idx] = fix_alt
                 changes.append((fix_idx, old, fix_alt,
                                  f"homopolymer '{nt * run_len}' @{start}{suffix}"))
+                if used_fallback:
+                    warnings.append(
+                        f"Homopolymer '{nt * run_len}' @{start}: no synonym >= "
+                        f"freq_threshold {freq_threshold} could fix this; used "
+                        f"{fix_alt} below threshold as a last resort."
+                    )
                 improved = True
                 break
             elif fix_pair is not None:
@@ -285,6 +291,12 @@ def _run_optimization(codons: list[str], codon_table: dict,
                     codons[ci] = alt
                     changes.append((ci, old, alt,
                                      f"homopolymer '{nt * run_len}' @{start} (pair){suffix}"))
+                if used_fallback:
+                    warnings.append(
+                        f"Homopolymer '{nt * run_len}' @{start}: no synonym pair >= "
+                        f"freq_threshold {freq_threshold} could fix this; used a pair "
+                        f"below threshold as a last resort."
+                    )
                 improved = True
                 break
             else:
@@ -330,6 +342,12 @@ def _run_optimization(codons: list[str], codon_table: dict,
                 codons[best_idx] = best_alt
                 changes.append((best_idx, old, best_alt,
                                  f"adjacent ({i}&{j}: {c}){suffix}"))
+                if used_fallback:
+                    warnings.append(
+                        f"Codons {i}&{j} ({c}): no synonym >= freq_threshold "
+                        f"{freq_threshold} could fix this adjacent pair; used "
+                        f"{best_alt} below threshold as a last resort."
+                    )
                 improved = True
                 break
 
@@ -376,6 +394,12 @@ def _run_optimization(codons: list[str], codon_table: dict,
                 codons[best_idx] = best_alt
                 changes.append((best_idx, old, best_alt,
                                  f"skip-1 ({i}&{j}: {c}){suffix}"))
+                if used_fallback:
+                    warnings.append(
+                        f"Codons {i}&{j} ({c}): no synonym >= freq_threshold "
+                        f"{freq_threshold} could fix this skip-1 repeat; used "
+                        f"{best_alt} below threshold as a last resort."
+                    )
                 improved = True
                 break
 
