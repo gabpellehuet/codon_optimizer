@@ -169,34 +169,59 @@ class CodonOptimizerApp(tk.Tk):
         self._build_restriction_tab(restriction_tab)
 
     def _build_restriction_tab(self, parent):
-        left = ttk.Frame(parent, padding=8)
-        left.pack(side="left", fill="y")
-
-        ttk.Label(left, text="Filter:").pack(side="top", anchor="w")
+        # Available enzymes (filterable), left
+        avail_frame = ttk.Frame(parent, padding=8)
+        avail_frame.pack(side="left", fill="y")
+        ttk.Label(avail_frame, text="Available enzymes").pack(side="top", anchor="w")
+        ttk.Label(avail_frame, text="Filter:").pack(side="top", anchor="w")
         self.enzyme_filter = tk.StringVar()
-        filter_entry = ttk.Entry(left, textvariable=self.enzyme_filter, width=22)
+        filter_entry = ttk.Entry(avail_frame, textvariable=self.enzyme_filter, width=20)
         filter_entry.pack(side="top", fill="x")
         filter_entry.bind("<KeyRelease>", self._on_enzyme_filter_change)
 
-        list_frame = ttk.Frame(left)
-        list_frame.pack(side="top", fill="both", expand=True, pady=(5, 0))
-        self.enzyme_listbox = tk.Listbox(list_frame, selectmode="extended",
-                                          height=6, exportselection=False)
+        avail_list_frame = ttk.Frame(avail_frame)
+        avail_list_frame.pack(side="top", fill="both", expand=True, pady=(5, 0))
+        self.enzyme_listbox = tk.Listbox(avail_list_frame, selectmode="extended",
+                                          height=8, exportselection=False)
         self.enzyme_listbox.pack(side="left", fill="both", expand=True)
-        enzyme_scroll = ttk.Scrollbar(list_frame, command=self.enzyme_listbox.yview)
-        enzyme_scroll.pack(side="right", fill="y")
-        self.enzyme_listbox.config(yscrollcommand=enzyme_scroll.set)
+        avail_scroll = ttk.Scrollbar(avail_list_frame, command=self.enzyme_listbox.yview)
+        avail_scroll.pack(side="right", fill="y")
+        self.enzyme_listbox.config(yscrollcommand=avail_scroll.set)
+        self.enzyme_listbox.bind("<Double-Button-1>", lambda e: self._add_selected_enzymes())
 
         self._all_enzyme_names = restriction_sites.list_enzyme_names()
         self._populate_enzyme_listbox(self._all_enzyme_names)
 
-        button_col = ttk.Frame(left)
+        # Add / Remove buttons, middle
+        move_frame = ttk.Frame(parent, padding=8)
+        move_frame.pack(side="left", fill="y")
+        ttk.Button(move_frame, text="Add →",
+                   command=self._add_selected_enzymes).pack(side="top", pady=(60, 5))
+        ttk.Button(move_frame, text="← Remove",
+                   command=self._remove_selected_enzymes).pack(side="top")
+
+        # Selected enzymes + action buttons, next
+        sel_frame = ttk.Frame(parent, padding=8)
+        sel_frame.pack(side="left", fill="y")
+        ttk.Label(sel_frame, text="Selected enzymes").pack(side="top", anchor="w")
+        sel_list_frame = ttk.Frame(sel_frame)
+        sel_list_frame.pack(side="top", fill="both", expand=True, pady=(5, 0))
+        self.selected_listbox = tk.Listbox(sel_list_frame, selectmode="extended",
+                                            height=8, exportselection=False)
+        self.selected_listbox.pack(side="left", fill="both", expand=True)
+        sel_scroll = ttk.Scrollbar(sel_list_frame, command=self.selected_listbox.yview)
+        sel_scroll.pack(side="right", fill="y")
+        self.selected_listbox.config(yscrollcommand=sel_scroll.set)
+        self.selected_listbox.bind("<Double-Button-1>", lambda e: self._remove_selected_enzymes())
+
+        button_col = ttk.Frame(sel_frame)
         button_col.pack(side="top", fill="x", pady=(5, 0))
         ttk.Button(button_col, text="Show restriction sites",
                    command=self._show_restriction_sites).pack(side="top", fill="x")
         ttk.Button(button_col, text="Eliminate restriction sites",
                    command=self._eliminate_restriction_sites).pack(side="top", fill="x", pady=(3, 0))
 
+        # Results, right (expands)
         right = ttk.Frame(parent, padding=8)
         right.pack(side="left", fill="both", expand=True)
         self.restriction_tree = ttk.Treeview(
@@ -220,8 +245,21 @@ class CodonOptimizerApp(tk.Tk):
             else self._all_enzyme_names
         self._populate_enzyme_listbox(names)
 
+    def _add_selected_enzymes(self):
+        chosen = [self.enzyme_listbox.get(i) for i in self.enzyme_listbox.curselection()]
+        current = set(self.selected_listbox.get(0, "end"))
+        current.update(chosen)
+        self.selected_listbox.delete(0, "end")
+        for name in sorted(current):
+            self.selected_listbox.insert("end", name)
+
+    def _remove_selected_enzymes(self):
+        sel = list(self.selected_listbox.curselection())
+        for i in reversed(sel):
+            self.selected_listbox.delete(i)
+
     def _selected_enzymes(self):
-        return [self.enzyme_listbox.get(i) for i in self.enzyme_listbox.curselection()]
+        return list(self.selected_listbox.get(0, "end"))
 
     def _refresh_restriction_tree(self, sites: dict):
         for row in self.restriction_tree.get_children():

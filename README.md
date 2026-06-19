@@ -60,8 +60,10 @@ internet connection).
 
 ### Restriction site detection/elimination (GUI)
 
-The "Restriction Sites" tab lets you select one or more restriction enzymes
-(alphabetically listed, with a filter box) and:
+The "Restriction Sites" tab lets you build up a list of enzymes to act on:
+filter/search the alphabetical "Available enzymes" list, then "Add →" (or
+double-click) to move enzymes into "Selected enzymes" one at a time;
+"← Remove" (or double-click) takes them back out. Once you have a selection:
 - **Show restriction sites**: lists where each selected enzyme's recognition
   site occurs in the current optimized sequence (uses Biopython's
   `Bio.Restriction`).
