@@ -49,7 +49,9 @@ The GUI includes an "Organism" dropdown with codon usage tables bundled locally
 (no internet connection needed) for *E. coli* K12, *S. cerevisiae*, *H. sapiens*,
 *M. musculus*, *P. pastoris*, and *B. subtilis*, sourced from the
 [Kazusa Codon Usage Database](https://www.kazusa.or.jp/codon/). You can also load
-a custom table from a file.
+a custom table from a file, or use "Fetch from Kazusa online..." to search and
+download a table for any organism in the live database directly (requires an
+internet connection).
 
 ## Building the Windows executable yourself
 

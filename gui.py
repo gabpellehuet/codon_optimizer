@@ -21,8 +21,10 @@ from reverse_translation import (
     CODON_TABLE_TEXT,
 )
 from codon_tables import CODON_TABLES
+import kazusa_online
 
 CUSTOM_TABLE_LABEL = "Custom / loaded from file"
+ONLINE_TABLE_LABEL = "Custom / fetched from Kazusa online"
 
 DEFAULT_AA_SEQUENCE = (
     "EIIEEVLLNSKKDSLTEAEIYELVQKQLSTDPALKGVKLSKEEVRETLQELVIEGRLIKDKITGKYRLSTNTRLELLIEQLP"
@@ -107,7 +109,7 @@ class CodonOptimizerApp(tk.Tk):
         picker_row.grid(row=0, column=0, sticky="ew")
         ttk.Label(picker_row, text="Organism:").pack(side="left")
         self.organism = tk.StringVar(value="Escherichia coli K12")
-        organism_names = list(CODON_TABLES.keys()) + [CUSTOM_TABLE_LABEL]
+        organism_names = list(CODON_TABLES.keys()) + [CUSTOM_TABLE_LABEL, ONLINE_TABLE_LABEL]
         self.organism_combo = ttk.Combobox(
             picker_row, textvariable=self.organism, values=organism_names,
             state="readonly", width=28,
@@ -115,8 +117,13 @@ class CodonOptimizerApp(tk.Tk):
         self.organism_combo.pack(side="left", padx=(5, 0))
         self.organism_combo.bind("<<ComboboxSelected>>", self._on_organism_change)
 
-        ttk.Button(table_frame, text="Load from file...",
-                   command=self._load_table_file).grid(row=1, column=0, sticky="w", pady=(5, 0))
+        button_row = ttk.Frame(table_frame)
+        button_row.grid(row=1, column=0, sticky="w", pady=(5, 0))
+        ttk.Button(button_row, text="Load from file...",
+                   command=self._load_table_file).pack(side="left")
+        ttk.Button(button_row, text="Fetch from Kazusa online...",
+                   command=self._fetch_from_kazusa).pack(side="left", padx=(5, 0))
+
         self.table_text = tk.Text(table_frame, height=5, wrap="none")
         self.table_text.grid(row=2, column=0, sticky="nsew", pady=(5, 0))
         self.table_text.insert("1.0", CODON_TABLE_TEXT.strip())
@@ -162,7 +169,7 @@ class CodonOptimizerApp(tk.Tk):
 
     def _on_organism_change(self, event=None):
         name = self.organism.get()
-        if name == CUSTOM_TABLE_LABEL:
+        if name in (CUSTOM_TABLE_LABEL, ONLINE_TABLE_LABEL):
             return
         self.table_text.delete("1.0", "end")
         self.table_text.insert("1.0", CODON_TABLES[name].strip())
@@ -179,6 +186,81 @@ class CodonOptimizerApp(tk.Tk):
         self.table_text.delete("1.0", "end")
         self.table_text.insert("1.0", content)
         self.organism.set(CUSTOM_TABLE_LABEL)
+
+    def _fetch_from_kazusa(self):
+        dialog = tk.Toplevel(self)
+        dialog.title("Fetch from Kazusa Codon Usage Database")
+        dialog.geometry("520x400")
+        dialog.transient(self)
+
+        top_row = ttk.Frame(dialog, padding=8)
+        top_row.pack(side="top", fill="x")
+        ttk.Label(top_row, text="Organism name:").pack(side="left")
+        query_var = tk.StringVar()
+        entry = ttk.Entry(top_row, textvariable=query_var, width=30)
+        entry.pack(side="left", padx=5, fill="x", expand=True)
+        entry.focus_set()
+
+        status_var = tk.StringVar(value="Type an organism name and press Search.")
+        status_label = ttk.Label(dialog, textvariable=status_var, padding=(8, 0))
+        status_label.pack(side="top", fill="x")
+
+        results_frame = ttk.Frame(dialog, padding=8)
+        results_frame.pack(side="top", fill="both", expand=True)
+        listbox = tk.Listbox(results_frame)
+        listbox.pack(side="left", fill="both", expand=True)
+        scrollbar = ttk.Scrollbar(results_frame, command=listbox.yview)
+        scrollbar.pack(side="right", fill="y")
+        listbox.config(yscrollcommand=scrollbar.set)
+
+        button_row = ttk.Frame(dialog, padding=8)
+        button_row.pack(side="bottom", fill="x")
+
+        search_results: list[tuple[str, str]] = []
+
+        def do_search(event=None):
+            query = query_var.get().strip()
+            if not query:
+                return
+            status_var.set("Searching...")
+            dialog.update()
+            try:
+                results = kazusa_online.search_organisms(query)
+            except Exception as exc:
+                status_var.set(f"Search failed: {exc}")
+                return
+            search_results.clear()
+            search_results.extend(results)
+            listbox.delete(0, "end")
+            for _, label in results:
+                listbox.insert("end", label)
+            status_var.set(f"{len(results)} result(s) found." if results
+                            else "No matches found.")
+
+        def do_use_selected():
+            sel = listbox.curselection()
+            if not sel:
+                messagebox.showinfo("No selection", "Select an organism from the list first.")
+                return
+            species_id, label = search_results[sel[0]]
+            status_var.set(f"Fetching codon table for {label}...")
+            dialog.update()
+            try:
+                table_text = kazusa_online.fetch_codon_table(species_id)
+            except Exception as exc:
+                messagebox.showerror("Fetch failed", str(exc))
+                return
+            self.table_text.delete("1.0", "end")
+            self.table_text.insert("1.0", table_text)
+            self.organism.set(ONLINE_TABLE_LABEL)
+            dialog.destroy()
+
+        entry.bind("<Return>", do_search)
+        ttk.Button(top_row, text="Search", command=do_search).pack(side="left")
+        ttk.Button(button_row, text="Use selected",
+                   command=do_use_selected).pack(side="left")
+        ttk.Button(button_row, text="Cancel",
+                   command=dialog.destroy).pack(side="left", padx=5)
 
     # ── Core action ─────────────────────────────────────────────────────
     def _run_optimization(self):
