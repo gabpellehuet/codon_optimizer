@@ -33,7 +33,9 @@ class CodonOptimizerApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Codon Optimizer")
-        self.geometry("1000x720")
+        screen_h = self.winfo_screenheight()
+        height = max(600, min(720, screen_h - 120))  # leave room for taskbar/title bar
+        self.geometry(f"1000x{height}")
         self.minsize(800, 600)
         self._result = None
         self._build_widgets()
