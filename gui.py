@@ -29,13 +29,35 @@ DEFAULT_AA_SEQUENCE = (
 )
 
 
+def _get_work_area():
+    """Return (top, usable_height) of the screen area excluding the Windows
+    taskbar, via the SPI_GETWORKAREA system call. Falls back to a rough
+    estimate on non-Windows platforms (e.g. running the GUI from source on
+    Linux/macOS for testing)."""
+    try:
+        import ctypes
+
+        class RECT(ctypes.Structure):
+            _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                        ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+        rect = RECT()
+        SPI_GETWORKAREA = 0x0030
+        ctypes.windll.user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(rect), 0)
+        return rect.top, rect.bottom - rect.top
+    except (AttributeError, OSError):
+        return 0, None
+
+
 class CodonOptimizerApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Codon Optimizer")
-        screen_h = self.winfo_screenheight()
-        height = max(600, min(720, screen_h - 120))  # leave room for taskbar/title bar
-        self.geometry(f"1000x{height}")
+        top, usable_h = _get_work_area()
+        if usable_h is None:
+            usable_h = self.winfo_screenheight() - 80
+        height = max(600, min(720, usable_h - 20))
+        self.geometry(f"1000x{height}+100+{top + 10}")
         self.minsize(800, 600)
         self._result = None
         self._build_widgets()
