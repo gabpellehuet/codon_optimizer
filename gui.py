@@ -56,7 +56,8 @@ class CodonOptimizerApp(tk.Tk):
         top, usable_h = _get_work_area()
         if usable_h is None:
             usable_h = self.winfo_screenheight() - 80
-        height = max(600, min(720, usable_h - 20))
+        TITLE_BAR_H = 32  # tkinter's geometry height excludes the title bar
+        height = max(600, min(680, usable_h - TITLE_BAR_H - 20))
         self.geometry(f"1000x{height}+100+{top + 10}")
         self.minsize(800, 600)
         self._result = None
