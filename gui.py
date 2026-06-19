@@ -1,9 +1,10 @@
 """
 Codon Optimizer - GUI
 ======================
-Tkinter front-end for reverse_translation.py. Pure stdlib (tkinter ships with
-Python), so it can be frozen into a single Windows executable with PyInstaller
-without pulling in any extra dependencies.
+Tkinter front-end for reverse_translation.py. The GUI itself only needs
+tkinter (stdlib), but the restriction-site tab depends on Biopython
+(Bio.Restriction) -- run `pip install biopython` before running from source
+or rebuilding the frozen executable.
 
 Run with:
     python gui.py
@@ -22,6 +23,7 @@ from reverse_translation import (
 )
 from codon_tables import CODON_TABLES
 import kazusa_online
+import restriction_sites
 
 CUSTOM_TABLE_LABEL = "Custom / loaded from file"
 ONLINE_TABLE_LABEL = "Custom / fetched from Kazusa online"
@@ -161,6 +163,109 @@ class CodonOptimizerApp(tk.Tk):
 
         self.issues_text = tk.Text(self.notebook, height=8, wrap="word", state="disabled")
         self.notebook.add(self.issues_text, text="Warnings / Remaining issues")
+
+        restriction_tab = ttk.Frame(self.notebook)
+        self.notebook.add(restriction_tab, text="Restriction Sites")
+        self._build_restriction_tab(restriction_tab)
+
+    def _build_restriction_tab(self, parent):
+        left = ttk.Frame(parent, padding=8)
+        left.pack(side="left", fill="y")
+
+        ttk.Label(left, text="Filter:").pack(side="top", anchor="w")
+        self.enzyme_filter = tk.StringVar()
+        filter_entry = ttk.Entry(left, textvariable=self.enzyme_filter, width=22)
+        filter_entry.pack(side="top", fill="x")
+        filter_entry.bind("<KeyRelease>", self._on_enzyme_filter_change)
+
+        list_frame = ttk.Frame(left)
+        list_frame.pack(side="top", fill="both", expand=True, pady=(5, 0))
+        self.enzyme_listbox = tk.Listbox(list_frame, selectmode="extended",
+                                          height=6, exportselection=False)
+        self.enzyme_listbox.pack(side="left", fill="both", expand=True)
+        enzyme_scroll = ttk.Scrollbar(list_frame, command=self.enzyme_listbox.yview)
+        enzyme_scroll.pack(side="right", fill="y")
+        self.enzyme_listbox.config(yscrollcommand=enzyme_scroll.set)
+
+        self._all_enzyme_names = restriction_sites.list_enzyme_names()
+        self._populate_enzyme_listbox(self._all_enzyme_names)
+
+        button_col = ttk.Frame(left)
+        button_col.pack(side="top", fill="x", pady=(5, 0))
+        ttk.Button(button_col, text="Show restriction sites",
+                   command=self._show_restriction_sites).pack(side="top", fill="x")
+        ttk.Button(button_col, text="Eliminate restriction sites",
+                   command=self._eliminate_restriction_sites).pack(side="top", fill="x", pady=(3, 0))
+
+        right = ttk.Frame(parent, padding=8)
+        right.pack(side="left", fill="both", expand=True)
+        self.restriction_tree = ttk.Treeview(
+            right, columns=("enzyme", "position", "site"), show="headings"
+        )
+        for col, label, width in [("enzyme", "Enzyme", 100),
+                                   ("position", "Position (nt)", 100),
+                                   ("site", "Recognition site", 150)]:
+            self.restriction_tree.heading(col, text=label)
+            self.restriction_tree.column(col, width=width, anchor="center")
+        self.restriction_tree.pack(fill="both", expand=True)
+
+    def _populate_enzyme_listbox(self, names):
+        self.enzyme_listbox.delete(0, "end")
+        for name in names:
+            self.enzyme_listbox.insert("end", name)
+
+    def _on_enzyme_filter_change(self, event=None):
+        query = self.enzyme_filter.get().strip().lower()
+        names = [n for n in self._all_enzyme_names if query in n.lower()] if query \
+            else self._all_enzyme_names
+        self._populate_enzyme_listbox(names)
+
+    def _selected_enzymes(self):
+        return [self.enzyme_listbox.get(i) for i in self.enzyme_listbox.curselection()]
+
+    def _refresh_restriction_tree(self, sites: dict):
+        for row in self.restriction_tree.get_children():
+            self.restriction_tree.delete(row)
+        final_nt = "".join(self._result["final_codons"]) if self._result else ""
+        for enzyme_name, spans in sites.items():
+            for start, end in spans:
+                self.restriction_tree.insert(
+                    "", "end", values=(enzyme_name, start, final_nt[start:end])
+                )
+
+    def _show_restriction_sites(self):
+        if not self._result:
+            messagebox.showinfo("Nothing to scan", "Run an optimization first.")
+            return
+        enzymes = self._selected_enzymes()
+        if not enzymes:
+            messagebox.showinfo("No enzymes selected",
+                                 "Select one or more restriction enzymes from the list first.")
+            return
+        sites = restriction_sites.find_sites(self._result["final_codons"], enzymes)
+        self._refresh_restriction_tree(sites)
+        self.notebook.select(3)
+
+    def _eliminate_restriction_sites(self):
+        if not self._result:
+            messagebox.showinfo("Nothing to fix", "Run an optimization first.")
+            return
+        enzymes = self._selected_enzymes()
+        if not enzymes:
+            messagebox.showinfo("No enzymes selected",
+                                 "Select one or more restriction enzymes from the list first.")
+            return
+        ct = self._result["codon_table"]
+        threshold = self.freq_threshold.get()
+        new_codons, changes, warnings, remaining = restriction_sites.eliminate_sites(
+            self._result["final_codons"], ct, enzymes, freq_threshold=threshold,
+        )
+        self._result["final_codons"] = new_codons
+        self._result["changes"] = self._result["changes"] + changes
+        self._result["warnings"] = self._result["warnings"] + warnings
+        self._display_result(self._result, threshold)
+        self._refresh_restriction_tree(remaining)
+        self.notebook.select(3)
 
     def _on_mode_change(self):
         self.seq_text.delete("1.0", "end")
